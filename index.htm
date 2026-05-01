@@ -2,149 +2,190 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Controle Remoto Total</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebRTC Streamer & Remote Control</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        .touchpad {
-            background: #1e293b;
-            aspect-ratio: 16/9;
-            width: 100%;
-            border-radius: 1rem;
-            touch-action: none;
+        .video-container {
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            touch-action: none; /* Crucial para mobile: impede scroll ao controlar */
             position: relative;
-            border: 2px solid #334155;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #475569;
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
         }
-        .key {
-            background: #334155;
-            color: white;
-            padding: 10px 5px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            text-align: center;
-            cursor: pointer;
-            user-select: none;
-            touch-action: manipulation;
-            transition: background 0.1s;
+        #screenVideo {
+            width: 100%;
+            height: auto;
+            display: block;
+            pointer-events: none;
         }
-        .key:active {
-            background: #3b82f6;
+        /* Feedback visual do clique */
+        .click-ripple {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: rgba(59, 130, 246, 0.5);
+            border: 2px solid white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            animation: ripple 0.4s ease-out;
         }
-        .key-wide { grid-column: span 2; }
-        .key-extra-wide { grid-column: span 3; }
-        .keyboard-grid {
-            display: grid;
-            grid-template-columns: repeat(10, 1fr);
-            gap: 4px;
+        @keyframes ripple {
+            from { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+            to { transform: translate(-50%, -50%) scale(2); opacity: 0; }
         }
     </style>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col items-center p-4">
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col items-center p-4">
 
-    <div class="max-w-2xl w-full space-y-4">
-        <!-- Conexão -->
-        <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
-            <div class="flex gap-2">
-                <input type="text" id="ws-ip" placeholder="IP do Computador" class="bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm grow outline-none focus:border-blue-500">
-                <button id="wsConnectBtn" class="bg-blue-600 px-4 py-2 rounded text-sm font-bold">Ligar</button>
+    <div class="max-w-4xl w-full space-y-4">
+        <header class="flex justify-between items-center">
+            <h1 class="text-xl font-bold text-blue-400">Remote Control Hub</h1>
+            <div id="status-dot" class="w-3 h-3 rounded-full bg-red-500"></div>
+        </header>
+
+        <!-- Conexão WebRTC -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="bg-slate-900 p-3 rounded-lg border border-slate-800">
+                <p class="text-[10px] text-slate-500 uppercase font-bold mb-1">Meu ID Local</p>
+                <div id="my-id" class="text-lg font-mono text-blue-300">A iniciar...</div>
             </div>
-            <div id="ws-status" class="text-[10px] mt-1 text-slate-500 text-center uppercase tracking-widest">Desconectado</div>
+            <div class="bg-slate-900 p-3 rounded-lg border border-slate-800 flex gap-2">
+                <input type="text" id="remote-id" placeholder="ID do Streamer" class="bg-black border border-slate-700 rounded px-3 py-1 text-sm grow focus:border-blue-500 outline-none">
+                <button id="connectBtn" class="bg-blue-600 hover:bg-blue-500 px-4 py-1 rounded text-sm font-bold transition">Conectar</button>
+            </div>
         </div>
 
-        <!-- Mouse -->
-        <div id="touchpad" class="touchpad">Touchpad</div>
+        <!-- Conexão WebSocket (Mouse) -->
+        <div class="bg-slate-900 p-3 rounded-lg border border-slate-800 flex flex-wrap gap-3 items-center">
+            <div class="grow">
+                <input type="text" id="ws-ip" placeholder="IP do Computador (ex: 192.168.1.10)" class="w-full bg-black border border-slate-700 rounded px-3 py-2 text-sm outline-none focus:border-green-500">
+            </div>
+            <button id="wsConnectBtn" class="bg-slate-700 hover:bg-slate-600 px-6 py-2 rounded text-sm font-bold transition">Ligar Mouse</button>
+            <p id="ws-status" class="w-full text-center text-[10px] text-slate-500 italic">Servidor Python não detetado</p>
+        </div>
 
-        <!-- Escrita Direta -->
+        <!-- Área do Stream -->
+        <div id="interactiveArea" class="video-container cursor-none">
+            <video id="screenVideo" autoplay playsinline muted></video>
+            <div id="placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-600 bg-slate-900">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <p>Sem sinal de vídeo</p>
+            </div>
+        </div>
+
         <div class="flex gap-2">
-            <input type="text" id="textInput" placeholder="Digite aqui e pressione Enter..." class="bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm grow outline-none focus:border-blue-500">
-            <button id="sendTextBtn" class="bg-slate-700 px-4 py-2 rounded text-sm font-bold">Enviar</button>
-        </div>
-
-        <!-- Teclado Virtual -->
-        <div class="bg-slate-800 p-3 rounded-xl border border-slate-700 space-y-2">
-            <!-- Linha 1 -->
-            <div class="keyboard-grid">
-                <div class="key" data-key="q">Q</div><div class="key" data-key="w">W</div><div class="key" data-key="e">E</div><div class="key" data-key="r">R</div><div class="key" data-key="t">T</div>
-                <div class="key" data-key="y">Y</div><div class="key" data-key="u">U</div><div class="key" data-key="i">I</div><div class="key" data-key="o">O</div><div class="key" data-key="p">P</div>
-            </div>
-            <!-- Linha 2 -->
-            <div class="keyboard-grid px-2">
-                <div class="key" data-key="a">A</div><div class="key" data-key="s">S</div><div class="key" data-key="d">D</div><div class="key" data-key="f">F</div><div class="key" data-key="g">G</div>
-                <div class="key" data-key="h">H</div><div class="key" data-key="j">J</div><div class="key" data-key="k">K</div><div class="key" data-key="l">L</div><div class="key" data-key="backspace">←</div>
-            </div>
-            <!-- Linha 3 -->
-            <div class="keyboard-grid">
-                <div class="key key-wide" data-key="shift">Shift</div><div class="key" data-key="z">Z</div><div class="key" data-key="x">X</div><div class="key" data-key="c">C</div>
-                <div class="key" data-key="v">V</div><div class="key" data-key="b">B</div><div class="key" data-key="n">N</div><div class="key" data-key="m">M</div><div class="key key-wide" data-key="enter">Enter</div>
-            </div>
-            <!-- Linha 4 (Controles) -->
-            <div class="grid grid-cols-4 gap-1">
-                <div class="key" data-key="ctrl">Ctrl</div>
-                <div class="key key-wide" data-key="space">Espaço</div>
-                <div class="key" data-key="esc">Esc</div>
-            </div>
+            <button id="startBtn" class="grow bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold">Transmitir minha tela</button>
+            <button id="fullscreenBtn" class="bg-slate-800 px-4 rounded-xl">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                </svg>
+            </button>
         </div>
     </div>
 
     <script>
-        const touchpad = document.getElementById('touchpad');
+        const video = document.getElementById('screenVideo');
+        const interactiveArea = document.getElementById('interactiveArea');
+        const startBtn = document.getElementById('startBtn');
+        const connectBtn = document.getElementById('connectBtn');
         const wsConnectBtn = document.getElementById('wsConnectBtn');
         const wsIpInput = document.getElementById('ws-ip');
         const wsStatus = document.getElementById('ws-status');
-        const textInput = document.getElementById('textInput');
-        const sendTextBtn = document.getElementById('sendTextBtn');
-        
+        const statusDot = document.getElementById('status-dot');
+
         let ws = null;
 
-        wsConnectBtn.onclick = () => {
-            const ip = wsIpInput.value;
-            if (!ip) return;
-            ws = new WebSocket(`ws://${ip}:9000`);
-            ws.onopen = () => {
-                wsStatus.innerText = "Conectado";
-                wsStatus.classList.add('text-green-400');
-                wsConnectBtn.classList.replace('bg-blue-600', 'bg-green-600');
-            };
-            ws.onclose = () => {
-                wsStatus.innerText = "Desconectado";
-                wsStatus.classList.remove('text-green-400');
-            };
-        };
-
-        // Touchpad para cliques
-        touchpad.addEventListener('pointerdown', (e) => {
-            if (!ws || ws.readyState !== WebSocket.OPEN) return;
-            const rect = touchpad.getBoundingClientRect();
-            const x = ((e.clientX - rect.left) / rect.width) * 100;
-            const y = ((e.clientY - rect.top) / rect.height) * 100;
-            ws.send(JSON.stringify({ type: 'click', x: x.toFixed(2), y: y.toFixed(2) }));
-        });
-
-        // Teclado Virtual
-        document.querySelectorAll('.key').forEach(k => {
-            k.addEventListener('click', () => {
-                if (!ws || ws.readyState !== WebSocket.OPEN) return;
-                ws.send(JSON.stringify({ type: 'keypress', key: k.getAttribute('data-key') }));
+        // --- WebRTC (PeerJS) ---
+        const peer = new Peer();
+        peer.on('open', id => document.getElementById('my-id').innerText = id);
+        
+        peer.on('call', call => {
+            call.answer();
+            call.on('stream', stream => {
+                video.srcObject = stream;
+                document.getElementById('placeholder').classList.add('hidden');
+                statusDot.classList.replace('bg-red-500', 'bg-green-500');
             });
         });
 
-        // Enviar Texto Inteiro
-        const sendText = () => {
-            if (!ws || ws.readyState !== WebSocket.OPEN || !textInput.value) return;
-            ws.send(JSON.stringify({ type: 'write', text: textInput.value }));
-            textInput.value = '';
+        startBtn.onclick = async () => {
+            try {
+                const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                video.srcObject = stream;
+                document.getElementById('placeholder').classList.add('hidden');
+            } catch (err) {
+                console.error("Erro ao capturar tela:", err);
+            }
         };
 
-        sendTextBtn.onclick = sendText;
-        textInput.addEventListener('keypress', (e) => { if(e.key === 'Enter') sendText(); });
+        connectBtn.onclick = () => {
+            const id = document.getElementById('remote-id').value;
+            if (!id) return;
+            // Se estivermos a transmitir, enviamos o stream. Se não, apenas ligamos.
+            if (video.srcObject) peer.call(id, video.srcObject);
+            else console.log("Apenas conectando ao peer...");
+        };
 
+        // --- WebSocket (Controlo Mouse) ---
+        wsConnectBtn.onclick = () => {
+            const ip = wsIpInput.value;
+            if (!ip) return;
+            
+            if (ws) ws.close();
+            
+            ws = new WebSocket(`ws://${ip}:9000`);
+            
+            ws.onopen = () => {
+                wsStatus.innerText = "Mouse Conectado ao PC!";
+                wsStatus.className = "w-full text-center text-[10px] text-green-400 font-bold";
+                wsConnectBtn.classList.replace('bg-slate-700', 'bg-green-600');
+                wsConnectBtn.innerText = "Ligado";
+            };
+            
+            ws.onclose = () => {
+                wsStatus.innerText = "Conexão perdida";
+                wsStatus.className = "w-full text-center text-[10px] text-red-400";
+                wsConnectBtn.classList.replace('bg-green-600', 'bg-slate-700');
+                wsConnectBtn.innerText = "Reconectar";
+            };
+        };
+
+        // Captura de Clique/Toque
+        interactiveArea.addEventListener('pointerdown', (e) => {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+            const rect = interactiveArea.getBoundingClientRect();
+            
+            // Cálculo em percentagem (0-100)
+            const xPercent = ((e.clientX - rect.left) / rect.width) * 100;
+            const yPercent = ((e.clientY - rect.top) / rect.height) * 100;
+
+            // Feedback visual
+            const ripple = document.createElement('div');
+            ripple.className = 'click-ripple';
+            ripple.style.left = `${e.clientX - rect.left}px`;
+            ripple.style.top = `${e.clientY - rect.top}px`;
+            interactiveArea.appendChild(ripple);
+            setTimeout(() => ripple.remove(), 400);
+
+            // Envio para o Python
+            ws.send(JSON.stringify({
+                type: 'click',
+                x: xPercent.toFixed(2),
+                y: yPercent.toFixed(2)
+            }));
+        });
+
+        document.getElementById('fullscreenBtn').onclick = () => {
+            if (!document.fullscreenElement) interactiveArea.requestFullscreen();
+            else document.exitFullscreen();
+        };
     </script>
 </body>
 </html>
