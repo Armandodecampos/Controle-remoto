@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controle Remoto Total</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .touchpad {
+            background: #1e293b;
+            aspect-ratio: 16/9;
+            width: 100%;
+            border-radius: 1rem;
+            touch-action: none;
+            position: relative;
+            border: 2px solid #334155;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #475569;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+        .key {
+            background: #334155;
+            color: white;
+            padding: 10px 5px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            text-align: center;
+            cursor: pointer;
+            user-select: none;
+            touch-action: manipulation;
+            transition: background 0.1s;
+        }
+        .key:active {
+            background: #3b82f6;
+        }
+        .key-wide { grid-column: span 2; }
+        .key-extra-wide { grid-column: span 3; }
+        .keyboard-grid {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            gap: 4px;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col items-center p-4">
+
+    <div class="max-w-2xl w-full space-y-4">
+        <!-- Conexão -->
+        <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+            <div class="flex gap-2">
+                <input type="text" id="ws-ip" placeholder="IP do Computador" class="bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm grow outline-none focus:border-blue-500">
+                <button id="wsConnectBtn" class="bg-blue-600 px-4 py-2 rounded text-sm font-bold">Ligar</button>
+            </div>
+            <div id="ws-status" class="text-[10px] mt-1 text-slate-500 text-center uppercase tracking-widest">Desconectado</div>
+        </div>
+
+        <!-- Mouse -->
+        <div id="touchpad" class="touchpad">Touchpad</div>
+
+        <!-- Escrita Direta -->
+        <div class="flex gap-2">
+            <input type="text" id="textInput" placeholder="Digite aqui e pressione Enter..." class="bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm grow outline-none focus:border-blue-500">
+            <button id="sendTextBtn" class="bg-slate-700 px-4 py-2 rounded text-sm font-bold">Enviar</button>
+        </div>
+
+        <!-- Teclado Virtual -->
+        <div class="bg-slate-800 p-3 rounded-xl border border-slate-700 space-y-2">
+            <!-- Linha 1 -->
+            <div class="keyboard-grid">
+                <div class="key" data-key="q">Q</div><div class="key" data-key="w">W</div><div class="key" data-key="e">E</div><div class="key" data-key="r">R</div><div class="key" data-key="t">T</div>
+                <div class="key" data-key="y">Y</div><div class="key" data-key="u">U</div><div class="key" data-key="i">I</div><div class="key" data-key="o">O</div><div class="key" data-key="p">P</div>
+            </div>
+            <!-- Linha 2 -->
+            <div class="keyboard-grid px-2">
+                <div class="key" data-key="a">A</div><div class="key" data-key="s">S</div><div class="key" data-key="d">D</div><div class="key" data-key="f">F</div><div class="key" data-key="g">G</div>
+                <div class="key" data-key="h">H</div><div class="key" data-key="j">J</div><div class="key" data-key="k">K</div><div class="key" data-key="l">L</div><div class="key" data-key="backspace">←</div>
+            </div>
+            <!-- Linha 3 -->
+            <div class="keyboard-grid">
+                <div class="key key-wide" data-key="shift">Shift</div><div class="key" data-key="z">Z</div><div class="key" data-key="x">X</div><div class="key" data-key="c">C</div>
+                <div class="key" data-key="v">V</div><div class="key" data-key="b">B</div><div class="key" data-key="n">N</div><div class="key" data-key="m">M</div><div class="key key-wide" data-key="enter">Enter</div>
+            </div>
+            <!-- Linha 4 (Controles) -->
+            <div class="grid grid-cols-4 gap-1">
+                <div class="key" data-key="ctrl">Ctrl</div>
+                <div class="key key-wide" data-key="space">Espaço</div>
+                <div class="key" data-key="esc">Esc</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const touchpad = document.getElementById('touchpad');
+        const wsConnectBtn = document.getElementById('wsConnectBtn');
+        const wsIpInput = document.getElementById('ws-ip');
+        const wsStatus = document.getElementById('ws-status');
+        const textInput = document.getElementById('textInput');
+        const sendTextBtn = document.getElementById('sendTextBtn');
+        
+        let ws = null;
+
+        wsConnectBtn.onclick = () => {
+            const ip = wsIpInput.value;
+            if (!ip) return;
+            ws = new WebSocket(`ws://${ip}:9000`);
+            ws.onopen = () => {
+                wsStatus.innerText = "Conectado";
+                wsStatus.classList.add('text-green-400');
+                wsConnectBtn.classList.replace('bg-blue-600', 'bg-green-600');
+            };
+            ws.onclose = () => {
+                wsStatus.innerText = "Desconectado";
+                wsStatus.classList.remove('text-green-400');
+            };
+        };
+
+        // Touchpad para cliques
+        touchpad.addEventListener('pointerdown', (e) => {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            const rect = touchpad.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * 100;
+            const y = ((e.clientY - rect.top) / rect.height) * 100;
+            ws.send(JSON.stringify({ type: 'click', x: x.toFixed(2), y: y.toFixed(2) }));
+        });
+
+        // Teclado Virtual
+        document.querySelectorAll('.key').forEach(k => {
+            k.addEventListener('click', () => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) return;
+                ws.send(JSON.stringify({ type: 'keypress', key: k.getAttribute('data-key') }));
+            });
+        });
+
+        // Enviar Texto Inteiro
+        const sendText = () => {
+            if (!ws || ws.readyState !== WebSocket.OPEN || !textInput.value) return;
+            ws.send(JSON.stringify({ type: 'write', text: textInput.value }));
+            textInput.value = '';
+        };
+
+        sendTextBtn.onclick = sendText;
+        textInput.addEventListener('keypress', (e) => { if(e.key === 'Enter') sendText(); });
+
+    </script>
+</body>
+</html>
